@@ -7,15 +7,20 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
     const user = await User.findById(userId);
+    console.log("User fetched from DB:", user);
+    if (!user) {
+      throw new ApiError(404, "User not found while generating tokens");
+    }
     const accessToken = user.generateAccessToken();
     const refreshToken = user.generateRefreshToken();
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
     return { accessToken, refreshToken };
   } catch (error) {
+    console.error("Error inside token generation:", error); // Log real error
     throw new ApiError(
       500,
-      "Something went wrong while generating refresh and access token"
+      error?.message || "Something went wrong while generating tokens"
     );
   }
 };
@@ -101,7 +106,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const { email, username, password } = req.body;
 
-  if (!username || !email) {
+  if (!username && !email) {
     throw new ApiError(400, "Username or email is required");
   }
 
@@ -118,6 +123,7 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new ApiError(401, "Invalid user credentials");
   }
 
+  console.log("User ID for token generation :", user._id);
   const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(
     user._id
   );
@@ -128,7 +134,9 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const options = {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
   };
 
   return res
@@ -162,13 +170,15 @@ const logoutUser = asyncHandler(async (req, res) => {
   );
   const options = {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production", // Only secure in prod
+    sameSite: "strict",
+    path: "/", // Ensure path matches where cookies were set
   };
 
   return res
     .status(200)
-    .clearCookie("accessToken", options)
-    .clearCookie("refreshToken", options)
+    .clearCookie("accessToken", { ...options, maxAge: 0 })
+    .clearCookie("refreshToken", { ...options, maxAge: 0 })
     .json(new ApiResponse(200, {}, "User logged Out"));
 });
 
